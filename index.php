@@ -1,67 +1,53 @@
 <?php
-// FILE: index.php (With Info Page)
+// FILE: index.php (Auto-Size Version)
 // ==========================================
 
-// 1. SETTINGS
 set_time_limit(0);
 error_reporting(0);
 
-// 2. CHECK INPUT
+// 1. INPUTS
 $fileId = isset($_GET['id']) ? $_GET['id'] : '';
 if (empty($fileId)) { die("Error: No File ID provided."); }
 
-// 3. DECISION: DO WE SHOW INFO OR START DOWNLOAD?
-// If the URL has "&stream=true", we download. Otherwise, we show info.
 $isStreaming = isset($_GET['stream']);
+$passedTitle = isset($_GET['title']) ? $_GET['title'] : ''; // We use this if provided
 
-// Google URL
 $googleUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
 
 // ==================================================================
-// PART A: THE "INFO PAGE" (Shows Name & Size)
+// PART A: THE "INFO PAGE" (Fetch Size Automatically)
 // ==================================================================
 if (!$isStreaming) {
     
-    // We fetch the Google Page just to read the text
+    $fileName = $passedTitle ? $passedTitle : "Unknown Movie";
+    $fileSize = "Unknown Size"; // Default
+
+    // 1. Fetch the Google Page to find the size
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $googleUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    // Pretend to be a browser so Google shows us the warning text
     curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
     $html = curl_exec($ch);
     curl_close($ch);
 
-    // Default values if we can't find them
-    $fileName = "Unknown Movie.mp4";
-    $fileSize = "Unknown Size";
-
-    // SCRAPE THE INFO (Using DOMDocument)
-    $dom = new DOMDocument();
-    @$dom->loadHTML($html);
-
-    // 1. Try to find the "Virus Warning" text which contains the name and size
-    // Example text: "AVATAR.mp4 (2.5G) is too large..."
-    $xpath = new DOMXPath($dom);
-    $warningNodes = $xpath->query('//*[contains(@class, "uc-warning-subcaption")]');
+    // 2. THE SIZE HUNTER
+    // Google's warning usually says: "FILENAME (2.5G) is too large..."
+    // We look for that pattern: " (" followed by numbers/dots, followed by G or M, followed by ")"
     
-    if ($warningNodes->length > 0) {
-        $text = $warningNodes->item(0)->nodeValue;
+    if (preg_match('/\((\d+(\.\d+)?\s*[GM]B?)\)/i', $html, $matches)) {
+        // Found it! (e.g., "2.5G" or "500M")
+        $fileSize = $matches[1];
         
-        // Extract Name (Everything before the first parenthesis)
-        if (preg_match('/^(.*?) \((.*?)\)/', $text, $matches)) {
-            $fileName = trim($matches[1]);
-            $fileSize = trim($matches[2]);
-        }
-    } else {
-        // Fallback: Check for title tag or download button
-        $nodes = $xpath->query('//span[contains(@class, "uc-name-size")]');
-        if ($nodes->length > 0) {
-             $fileName = $nodes->item(0)->nodeValue;
+        // Add "B" if it's just "G" or "M" to make it look nicer (2.5GB)
+        if (strpos($fileSize, 'B') === false) {
+            $fileSize .= "B"; 
         }
     }
 
-    // RENDER THE HTML PAGE
+    // 3. RENDER THE CARD
     ?>
     <!DOCTYPE html>
     <html lang="en">
@@ -70,45 +56,46 @@ if (!$isStreaming) {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Download <?php echo htmlspecialchars($fileName); ?></title>
         <style>
-            body { font-family: 'Arial', sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .card { background: #1e1e1e; padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; max-width: 400px; width: 100%; border: 1px solid #333; }
-            h2 { color: #00d4ff; margin-bottom: 10px; font-size: 20px; }
-            p { color: #bbb; margin-bottom: 25px; }
-            .file-info { background: #2a2a2a; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: left; }
-            .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-            .value { font-size: 16px; color: #fff; font-weight: bold; margin-bottom: 10px; display: block; }
-            .btn { display: inline-block; background: #00d4ff; color: #000; padding: 15px 30px; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px; transition: 0.3s; width: 80%; }
-            .btn:hover { background: #00b8db; transform: scale(1.05); }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f0f0f; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .card { background: #1a1a1a; padding: 40px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.7); text-align: center; max-width: 420px; width: 90%; border: 1px solid #333; }
+            h2 { color: #00d4ff; margin-top: 0; font-size: 24px; letter-spacing: 1px; margin-bottom: 20px; }
+            .file-icon { font-size: 60px; margin-bottom: 10px; display: block; }
+            .file-info { background: #252525; padding: 20px; border-radius: 12px; margin: 25px 0; text-align: left; border: 1px solid #333; }
+            .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1.5px; display: block; margin-bottom: 5px; }
+            .value { font-size: 16px; color: #fff; font-weight: 600; display: block; margin-bottom: 15px; word-break: break-word; }
+            .value:last-child { margin-bottom: 0; }
+            .btn { display: block; background: linear-gradient(90deg, #00d4ff, #005bea); color: #fff; padding: 18px; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 18px; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 5px 15px rgba(0, 212, 255, 0.3); }
+            .btn:hover { transform: translateY(-3px); box-shadow: 0 10px 25px rgba(0, 212, 255, 0.5); }
         </style>
     </head>
     <body>
         <div class="card">
+            <span class="file-icon">🎬</span>
             <h2>Ready to Download</h2>
+            
             <div class="file-info">
-                <span class="label">File Name</span>
+                <span class="label">Movie Title</span>
                 <span class="value"><?php echo htmlspecialchars($fileName); ?></span>
                 
                 <span class="label">File Size</span>
                 <span class="value"><?php echo htmlspecialchars($fileSize); ?></span>
             </div>
             
-            <a href="?id=<?php echo $fileId; ?>&stream=true" class="btn">Download Now ⬇</a>
+            <a href="?id=<?php echo $fileId; ?>&stream=true&title=<?php echo urlencode($fileName); ?>" class="btn">Download Now ⬇</a>
         </div>
     </body>
     </html>
     <?php
-    exit; // Stop here! Don't download yet.
+    exit;
 }
 
-
 // ==================================================================
-// PART B: THE "STREAMING" LOGIC (Your existing code)
+// PART B: THE STREAM (Standard Proxy)
 // ==================================================================
-// This only runs if "&stream=true" is in the URL
 
 $cookieFile = tempnam(sys_get_temp_dir(), 'gdrive_cookie_');
+$passedTitle = isset($_GET['title']) ? $_GET['title'] : 'movie'; // Recapture title for filename
 
-// 1. GET THE FORM & COOKIES
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, $googleUrl);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -117,12 +104,9 @@ curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 curl_setopt($ch, CURLOPT_COOKIEJAR, $cookieFile);
 curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile);
 curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
-
 $html = curl_exec($ch);
-$info = curl_getinfo($ch);
 curl_close($ch);
 
-// 2. PARSE FORM
 $dom = new DOMDocument();
 @$dom->loadHTML($html);
 $downloadForm = $dom->getElementById('download-form');
@@ -137,17 +121,17 @@ if ($downloadForm) {
     }
     $finalUrl = $action . '?' . http_build_query($params);
 } else {
-    $finalUrl = $info['url']; // Direct download fallback
+    // If no warning form, maybe it's a direct link. 
+    // We can try to use the last effective URL or just stream the original if it was direct.
 }
 
-// 3. STREAM TO USER
 if ($finalUrl) {
     if (ob_get_level()) ob_end_clean();
     header('Content-Description: File Transfer');
     header('Content-Type: application/octet-stream');
-    // NOTE: We try to use the name from the ID, but for now we use a generic name or passed name
-    // If you want the real name in the download, you'd need to scrape it again here or pass it in URL
-    header('Content-Disposition: attachment; filename="movie.mp4"'); 
+    // CLEAN THE FILENAME: Remove special chars to avoid errors
+    $safeFileName = preg_replace('/[^a-zA-Z0-9_\- ]/', '', $passedTitle);
+    header('Content-Disposition: attachment; filename="' . $safeFileName . '.mp4"'); 
     header('Expires: 0');
     header('Cache-Control: must-revalidate');
     header('Pragma: public');
