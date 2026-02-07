@@ -1,5 +1,5 @@
 <?php
-// FILE: index.php (Version 2.0 - Stronger Cookie Finder)
+// FILE: index.php (Version 3.0 - The HTML Hunter)
 
 $fileId = isset($_GET['id']) ? $_GET['id'] : '';
 
@@ -7,56 +7,58 @@ if (empty($fileId)) {
     die("Error: No File ID provided.");
 }
 
-// 1. Setup the Google URL
+// 1. Setup the initial URL
 $googleUrl = "https://drive.google.com/uc?export=download&id=" . $fileId;
 
-// 2. Initialize cURL with "Browser" settings
+// 2. Initialize cURL
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, $googleUrl);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-curl_setopt($ch, CURLOPT_HEADER, true); // We need headers
+curl_setopt($ch, CURLOPT_HEADER, true); 
+// Act like a real Chrome browser
+curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-// TRICK: Act like a real browser so Google sends the cookies
-curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-
+// Get the response (Headers + Body)
 $response = curl_exec($ch);
-$header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-$headers = substr($response, 0, $header_size);
+$error = curl_error($ch);
 curl_close($ch);
 
-// 3. The "Smart" Search
-// We loop through EVERY header to find the specific "download_warning" cookie
-$confirmCode = "";
-
-// Split headers into lines
-$headerLines = explode("\r\n", $headers);
-
-foreach ($headerLines as $line) {
-    // Look for "Set-Cookie" lines
-    if (stripos($line, 'Set-Cookie') !== false) {
-        // Look for the magic words "download_warning"
-        if (preg_match('/download_warning[^=]*=([^;]*)/', $line, $matches)) {
-            $confirmCode = $matches[1];
-            break; // Found it! Stop looking.
-        }
-    }
+if ($error) {
+    die("cURL Error: " . $error);
 }
 
-// 4. The Decision
-if ($confirmCode) {
-    // SUCCESS: We found the code. Add it to the link.
+// 3. STRATEGY A: Look for the Cookie (The old way)
+if (preg_match('/download_warning[^=]*=([^;]*)/', $response, $matches)) {
+    $confirmCode = $matches[1];
     $directUrl = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirmCode";
     header("Location: $directUrl");
     exit;
-} else {
-    // FAILURE: We didn't find the code.
-    // Instead of sending you to the warning page, let's print an error so we know what happened.
-    // (You can change this back to a redirect later if you want).
-    echo "<h2>Error: Could not bypass Google Virus Warning.</h2>";
-    echo "<p>Google might be blocking the server IP or the file is too restricted.</p>";
-    echo "<p><b>Debug Info:</b> Check if the file is 'Public' on Google Drive.</p>";
+}
+
+// 4. STRATEGY B: Look inside the HTML Button (The new way)
+// Google often puts the code inside a link like: href="/uc?export=download&confirm=XXXX&id=..."
+if (preg_match('/confirm=([a-zA-Z0-9_-]+)/', $response, $matches)) {
+    $confirmCode = $matches[1];
+    $directUrl = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirmCode";
+    header("Location: $directUrl");
     exit;
 }
+
+// 5. STRATEGY C: Look for the specific "uuid" confirm pattern
+if (preg_match('/&confirm=([a-zA-Z0-9_-]+)/', $response, $matches)) {
+    $confirmCode = $matches[1];
+    $directUrl = "https://drive.google.com/uc?export=download&id=$fileId&confirm=$confirmCode";
+    header("Location: $directUrl");
+    exit;
+}
+
+// 6. FAILURE REPORTING
+// If we reach here, Google has completely blocked the script.
+echo "<h2>Failed to Bypass</h2>";
+echo "<p>We could not find the confirmation code. Google might be blocking this server's IP.</p>";
+echo "<hr>";
+echo "<h3>Debug Output (What Google sent back):</h3>";
+echo "<textarea style='width:100%; height:400px;'>" . htmlspecialchars($response) . "</textarea>";
 ?>
