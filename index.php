@@ -1,59 +1,104 @@
 <?php
-// FILE: index.php (Version 5.0 - The URL Fix)
+//======================================================================
+// THIS WORK WELL TO REDICT ON ERROR PAGE WITH OUT ASK TO CHOOSE ACCOUNT
+//======================================================================
 
-$fileId = isset($_GET['id']) ? $_GET['id'] : '';
 
-if (empty($fileId)) {
-    die("Error: No File ID provided.");
-}
+// SETTINGS
+// ----------------------
+// Max execution time: Unlimited (for large files)
+set_time_limit(0); 
+// Turn off error reporting to prevent corrupting the video file
+error_reporting(0); 
 
-// 1. Initial Request to Google
-$googleUrl = "https://drive.google.com/uc?export=download&id=" . $fileId;
+if (isset($_GET['id'])) {
+    $fileId = $_GET['id'];
+    $googleUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
 
-$ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, $googleUrl);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // 1. COOKIE JAR SETUP
+    // We need a place to store cookies so Google thinks we are the same person
+    $cookieFile = tempnam(sys_get_temp_dir(), 'gdrive_cookie_');
 
-$response = curl_exec($ch);
-curl_close($ch);
+    // 2. FIRST REQUEST: GET THE FORM
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $googleUrl);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_COOKIEJAR, $cookieFile);
+    curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    $html = curl_exec($ch);
+    $info = curl_getinfo($ch);
+    curl_close($ch);
 
-// 2. SCRAPE DATA: Look for the hidden "Form" inputs
-$confirmCode = "";
-$uuid = "";
+    // 3. PARSE THE HTML TO FIND THE HIDDEN BUTTON
+    $dom = new DOMDocument();
+    @$dom->loadHTML($html);
 
-// Find the 'confirm' value (usually "t")
-if (preg_match('/name="confirm" value="([^"]+)"/', $response, $matches)) {
-    $confirmCode = $matches[1];
-}
+    $downloadForm = $dom->getElementById('download-form');
+    $finalUrl = '';
 
-// Find the 'uuid' value
-if (preg_match('/name="uuid" value="([^"]+)"/', $response, $matches)) {
-    $uuid = $matches[1];
-}
-
-// 3. Construct the Final Download Link
-if ($confirmCode && $uuid) {
-    // Scrape the 'action' URL (e.g., https://drive.usercontent.google.com/download)
-    if (preg_match('/action="([^"]+)"/', $response, $actionMatches)) {
-        $downloadBaseUrl = $actionMatches[1];
+    if ($downloadForm) {
+        // If we found the form (Virus Warning Page)
+        $action = $downloadForm->getAttribute('action');
+        $inputs = $downloadForm->getElementsByTagName('input');
+        $params = [];
         
-        // FIX IS HERE: We correctly determine if we need '?' or '&'
-        $separator = (strpos($downloadBaseUrl, '?') !== false) ? '&' : '?';
+        foreach ($inputs as $input) {
+            $params[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
         
-        // Build the correct URL with "export=download" included
-        $finalUrl = $downloadBaseUrl . $separator . "id=" . $fileId . "&export=download&confirm=" . $confirmCode . "&uuid=" . $uuid;
+        // Build the secret link with the UUID and Confirm code
+        $finalUrl = $action . '?' . http_build_query($params);
         
-        // Redirect the user
-        header("Location: $finalUrl");
+    } else {
+        // If no form found, maybe it's a direct download (small file)
+        // We use the last URL we landed on.
+        $finalUrl = $info['url'];
+    }
+
+    // 4. FINAL STEP: STREAM THE FILE TO THE USER
+    // Instead of redirecting, we pull the data and pass it through.
+    
+    if ($finalUrl) {
+        // Clear any previous output (crucial for video files)
+        if (ob_get_level()) ob_end_clean();
+
+        // Set Headers so browser knows it's a download
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="video.mp4"'); // You can change the name here
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+
+        // Open a stream to the User
+        $outputParams = fopen('php://output', 'w');
+
+        $ch = curl_init($finalUrl);
+        curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile); // USE SAME COOKIES
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // This function writes data chunk-by-chunk to the user
+        // (Saves RAM so your server doesn't crash)
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use ($outputParams) {
+            return fwrite($outputParams, $data);
+        });
+
+        curl_exec($ch);
+        curl_close($ch);
+        fclose($outputParams);
+        
+        // Clean up
+        @unlink($cookieFile);
         exit;
     }
-}
 
-// 4. Fallback (If scraping failed)
-echo "<h2>Failed to Bypass</h2>";
-echo "<p>Could not find confirmation tokens.</p>";
-echo "<hr><textarea style='width:100%; height:400px;'>" . htmlspecialchars($response) . "</textarea>";
+} else {
+    echo "No ID provided.";
+}
 ?>
