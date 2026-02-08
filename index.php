@@ -1,67 +1,104 @@
 <?php
-// FILE: get_size.php
-// Version 3.0: Uses "Byte Range" to detect size instantly without downloading.
+//======================================================================
+// THIS WORK WELL TO REDICT ON ERROR PAGE WITH OUT ASK TO CHOOSE ACCOUNT
+//======================================================================
 
-// 1. INPUT
-$fileId = isset($_GET['id']) ? $_GET['id'] : '';
-if (empty($fileId)) { die("Error: No ID."); }
 
-$googleUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
+// SETTINGS
+// ----------------------
+// Max execution time: Unlimited (for large files)
+set_time_limit(0); 
+// Turn off error reporting to prevent corrupting the video file
+error_reporting(0); 
 
-// 2. THE SMART REQUEST
-$ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, $googleUrl);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-curl_setopt($ch, CURLOPT_HEADER, true); // Get Headers
-curl_setopt($ch, CURLOPT_NOBODY, false); // We need body if it's HTML
-curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
+if (isset($_GET['id'])) {
+    $fileId = $_GET['id'];
+    $googleUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
 
-// THE TRICK: Ask for only the first byte!
-// This stops us from downloading the whole 2.2MB file.
-curl_setopt($ch, CURLOPT_HTTPHEADER, ['Range: bytes=0-1']);
+    // 1. COOKIE JAR SETUP
+    // We need a place to store cookies so Google thinks we are the same person
+    $cookieFile = tempnam(sys_get_temp_dir(), 'gdrive_cookie_');
 
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-$headers = substr($response, 0, $header_size);
-$body = substr($response, $header_size);
-curl_close($ch);
+    // 2. FIRST REQUEST: GET THE FORM
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $googleUrl);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_COOKIEJAR, $cookieFile);
+    curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    $html = curl_exec($ch);
+    $info = curl_getinfo($ch);
+    curl_close($ch);
 
-$finalSize = "Unknown";
+    // 3. PARSE THE HTML TO FIND THE HIDDEN BUTTON
+    $dom = new DOMDocument();
+    @$dom->loadHTML($html);
 
-// 3. CASE A: DIRECT FILE (Status 206 Partial Content)
-// Google said: "Here is byte 0-1. The total size is X."
-if ($httpCode == 206) {
-    if (preg_match('/Content-Range: bytes \d+-\d+\/(\d+)/i', $headers, $matches)) {
-        $bytes = $matches[1];
-        $finalSize = formatBytes($bytes);
+    $downloadForm = $dom->getElementById('download-form');
+    $finalUrl = '';
+
+    if ($downloadForm) {
+        // If we found the form (Virus Warning Page)
+        $action = $downloadForm->getAttribute('action');
+        $inputs = $downloadForm->getElementsByTagName('input');
+        $params = [];
+        
+        foreach ($inputs as $input) {
+            $params[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
+        
+        // Build the secret link with the UUID and Confirm code
+        $finalUrl = $action . '?' . http_build_query($params);
+        
+    } else {
+        // If no form found, maybe it's a direct download (small file)
+        // We use the last URL we landed on.
+        $finalUrl = $info['url'];
     }
-} 
 
-// 4. CASE B: VIRUS WARNING PAGE (Status 200 OK)
-// Google ignored our range request and sent the HTML page instead.
-elseif ($httpCode == 200) {
-    // Scan the text for "(2.5G)" or "(500M)"
-    if (preg_match('/\(([\d\.]+)\s*([KMGT])B?\)/i', $body, $matches)) {
-        $number = $matches[1];
-        $unit = strtoupper($matches[2]); 
-        $finalSize = $number . $unit . "B"; 
+    // 4. FINAL STEP: STREAM THE FILE TO THE USER
+    // Instead of redirecting, we pull the data and pass it through.
+    
+    if ($finalUrl) {
+        // Clear any previous output (crucial for video files)
+        if (ob_get_level()) ob_end_clean();
+
+        // Set Headers so browser knows it's a download
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="video.mp4"'); // You can change the name here
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+
+        // Open a stream to the User
+        $outputParams = fopen('php://output', 'w');
+
+        $ch = curl_init($finalUrl);
+        curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile); // USE SAME COOKIES
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // This function writes data chunk-by-chunk to the user
+        // (Saves RAM so your server doesn't crash)
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use ($outputParams) {
+            return fwrite($outputParams, $data);
+        });
+
+        curl_exec($ch);
+        curl_close($ch);
+        fclose($outputParams);
+        
+        // Clean up
+        @unlink($cookieFile);
+        exit;
     }
-}
 
-// 5. OUTPUT
-echo $finalSize;
-
-
-// --- HELPER: Format Bytes to Readable Size ---
-function formatBytes($bytes, $precision = 2) { 
-    $units = array('B', 'KB', 'MB', 'GB', 'TB'); 
-    $bytes = max($bytes, 0); 
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024)); 
-    $pow = min($pow, count($units) - 1); 
-    $bytes /= pow(1024, $pow); 
-    return round($bytes, $precision) . $units[$pow]; 
+} else {
+    echo "No ID provided.";
 }
 ?>
