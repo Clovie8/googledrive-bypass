@@ -2,6 +2,19 @@
 // FILE: get_size.php
 // Version 3.0: Uses "Byte Range" to detect size instantly without downloading.
 
+// ==========================================
+// 1. ALLOW CORS (Crucial for Localhost & InfinityFree)
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+
+// Handle "Preflight" OPTIONS request (Browsers sometimes send this first)
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+
 // 1. INPUT
 $fileId = isset($_GET['id']) ? $_GET['id'] : '';
 if (empty($fileId)) { die("Error: No ID."); }
