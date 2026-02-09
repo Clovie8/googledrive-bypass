@@ -17,7 +17,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 
 // 1. INPUT
 $fileId = isset($_GET['id']) ? $_GET['id'] : '';
-if (empty($fileId)) { die("Error: No ID."); }
+if (empty($fileId)) {
+    header("Location: https://theonemovies.com");
+    exit;
+}
 
 $googleUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
 
