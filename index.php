@@ -12,6 +12,14 @@ set_time_limit(0);
 error_reporting(0); 
 
 if (isset($_GET['id'])) {
+
+    // 1. Get the title from the URL (or default to 'video' if not provided)
+    $title = isset($_GET['title']) ? $_GET['title'] : 'Video - TheOneMovies.com';
+
+    // 2. SANITIZE THE FILENAME
+    $safeTitle = preg_replace('/[^a-zA-Z0-9_\- ]/', '', $title);
+
+    
     $fileId = $_GET['id'];
     $googleUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
 
@@ -69,7 +77,7 @@ if (isset($_GET['id'])) {
         // Set Headers so browser knows it's a download
         header('Content-Description: File Transfer');
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="video.mp4"'); // You can change the name here
+        header('Content-Disposition: attachment; filename="' . $safeTitle . ' - TheOneMovies.com.mp4"'); // You can change the name here
         header('Expires: 0');
         header('Cache-Control: must-revalidate');
         header('Pragma: public');
@@ -99,6 +107,7 @@ if (isset($_GET['id'])) {
     }
 
 } else {
-    echo "No ID provided.";
+    header("Location: https://theonemovies.com");
+    exit;
 }
 ?>
